@@ -109,6 +109,17 @@ npm run dev
 
 Deploy `contracts/scholarship_tracker.py` first (or use the Studionet address above), then update `NEXT_PUBLIC_CONTRACT_ADDRESS`.
 
+Studionet redeploy (after editing the contract):
+
+```bash
+set PRIVATE_KEY=0x...
+python scripts/deploy_studionet.py
+```
+
+### GenVM / Equivalence Principle note
+
+`gl.nondet.web.render` for evidence pages runs **inside** `leader_fn` for both `review_epoch` and `judge_claim`. Validators re-run the same function via `gl.vm.run_nondet_unsafe`, so each validator independently acquires the pages before LLM judgment. Do not call `web.render` in ordinary write-path code outside that nondet block.
+
 ## Tests
 
 ```bash

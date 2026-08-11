@@ -213,6 +213,9 @@ class ScholarshipTracker(gl.Contract):
         return ",".join(cleaned)
 
     def _scrape_urls(self, urls: str) -> str:
+        """Fetch evidence pages. Must only run inside a nondet block
+        (leader_fn / validator_fn), so each validator acquires pages independently.
+        """
         if not urls:
             return ""
         chunks = []
@@ -721,8 +724,6 @@ Rules:
             urls = proof.evidence_urls
             proof_id = proof.id
 
-        page_text = self._scrape_urls(urls)
-
         title = s.title
         # Prefer pinned accepted conditions for fairness after mid-stream amends.
         conditions = a.accepted_conditions if a.accepted_conditions else s.conditions
@@ -730,6 +731,8 @@ Rules:
         warn_count = int(a.warn_count)
 
         def leader_fn():
+            # Fetch evidence inside nondet so leader + validators each acquire pages.
+            page_text = self._scrape_urls(urls)
             return self._review_prompt(
                 title,
                 conditions,
@@ -923,7 +926,7 @@ Rules:
             raise gl.vm.UserError("Claim already judged")
         a = self._require_award(cl.award_id)
         s = self._require_scholarship(cl.scholarship_id)
-        page_text = self._scrape_urls(cl.evidence_urls)
+        evidence_urls = cl.evidence_urls
         original = (
             a.accepted_conditions
             if a.accepted_conditions
@@ -937,6 +940,8 @@ Rules:
         claim_evidence = cl.evidence
 
         def leader_fn():
+            # Fetch claim evidence pages inside nondet for independent validator acquisition.
+            page_text = self._scrape_urls(evidence_urls)
             return self._claim_prompt(
                 title,
                 original,
