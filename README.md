@@ -9,13 +9,25 @@
 | **Lock GEN. Publish public conditions. Release stipends by milestone. Appeal unfair cuts.** |
 
 [![Live App](https://img.shields.io/badge/Live-scholarship--tracker--black.vercel.app-0f172a?style=for-the-badge&logo=vercel)](https://scholarship-tracker-black.vercel.app)
-[![Contract](https://img.shields.io/badge/Contract-GenLayer_Python-1f6feb?style=for-the-badge)](#core-contract-api)
+[![Contract](https://img.shields.io/badge/Contract-0x5545bEfB…1bA9A-1f6feb?style=for-the-badge)](#deployment)
 [![Frontend](https://img.shields.io/badge/Frontend-Next.js_+_TypeScript-111827?style=for-the-badge)](#project-structure)
-[![Network](https://img.shields.io/badge/Network-GenLayer_Studionet-16a34a?style=for-the-badge)](#environment-variables)
+[![Network](https://img.shields.io/badge/Network-GenLayer_Studionet-16a34a?style=for-the-badge)](#deployment)
 
 </div>
 
 ---
+
+## Deployment
+
+| Item | Value |
+|------|--------|
+| Live app | https://scholarship-tracker-black.vercel.app |
+| GitHub | https://github.com/hoasine/scholarship-tracker-dapp |
+| Network | GenLayer Studionet (`chainId` `61999`) |
+| Contract | `0x5545bEfBAb9773728e5Df0B23c543d947891bA9A` |
+| Source | `contracts/scholarship_tracker.py` |
+
+This address is the GenVM-compliant redeploy: `gl.nondet.web.render` runs inside the leader/validator nondet flow for `review_epoch` and `judge_claim`.
 
 ## Overview
 
@@ -31,6 +43,7 @@ Students must **accept** an offer before epochs start. Each epoch they submit pr
 - **Accountable amendments:** changing conditions requires stake + public reason
 - **Appeal layer:** students can claim unfair cuts or unfair rule changes
 - **Public evidence only:** localhost / private URLs blocked for AI-readable proofs
+- **GenVM-safe web evidence:** validators independently fetch pages inside `run_nondet_unsafe`
 
 ## Protocol Flow
 
@@ -60,6 +73,7 @@ Statuses:
 | Sponsor self-dealing | Sponsor cannot award themselves |
 | Amend blocking new awards | Awards allowed on `ACTIVE` or `AMENDED` |
 | Opaque pool drain | Epoch amount capped; remaining pool recoverable on close |
+| Invalid GenVM web scrape | `web.render` only inside leader/validator nondet blocks |
 
 ## Core Contract API
 
@@ -78,11 +92,27 @@ Statuses:
 | `close_scholarship` | write | Sponsor recovers remaining pool |
 | `get_scholarship` / `get_award` / … | view | Entity reads |
 
+## Demo Walkthrough (Studionet)
+
+1. Open the [live app](https://scholarship-tracker-black.vercel.app) and connect MetaMask on **GenLayer Studionet**.
+2. **Create scholarship** — use a 60s epoch for demos; pool ≥ amount/epoch (min 0.01 GEN).
+3. **Award** a second wallet (sponsor cannot self-award).
+4. As the student: **Accept** → **Submit proof** with a **public HTTPS** report URL (GitHub README / blog).
+5. Anyone: **Review epoch** — wait for staged loading; do not spam retries if Studio RPC is busy.
+6. Optional: amend with stake, leave, file/judge claim, or close when no active awards remain.
+
+Notes for reviewers:
+
+- `60s` epochs are demo-friendly; production programs can use longer windows.
+- Evidence must be publicly crawlable — localhost / private LAN URLs are rejected on-chain.
+- If Studio rate-limits, the UI keeps loading and retries for ~1 minute before surfacing an error.
+
 ## Project Structure
 
 ```text
 contracts/   # GenLayer intelligent contract (Python)
 deploy/      # Contract deployment scripts
+scripts/     # Studionet deploy helper
 frontend/    # Next.js application (TypeScript)
 tests/       # Contract/integration tests
 ```
@@ -116,9 +146,11 @@ set PRIVATE_KEY=0x...
 python scripts/deploy_studionet.py
 ```
 
-### GenVM / Equivalence Principle note
+## GenVM / Equivalence Principle
 
-`gl.nondet.web.render` for evidence pages runs **inside** `leader_fn` for both `review_epoch` and `judge_claim`. Validators re-run the same function via `gl.vm.run_nondet_unsafe`, so each validator independently acquires the pages before LLM judgment. Do not call `web.render` in ordinary write-path code outside that nondet block.
+`gl.nondet.web.render` for evidence pages runs **inside** `leader_fn` for both `review_epoch` and `judge_claim`. Validators re-run the same function via `gl.vm.run_nondet_unsafe`, so each validator independently acquires the pages before LLM judgment.
+
+Do **not** call `web.render` in ordinary write-path code outside that nondet block — GenVM validation will reject the contract.
 
 ## Tests
 
@@ -131,7 +163,7 @@ python -m pytest tests/direct/test_scholarship_tracker.py
 
 - Live app: [https://scholarship-tracker-black.vercel.app](https://scholarship-tracker-black.vercel.app)
 - GitHub: [https://github.com/hoasine/scholarship-tracker-dapp](https://github.com/hoasine/scholarship-tracker-dapp)
-- Contract (Studionet): `0x5545bEfBAb9773728e5Df0B23c543d947891bA9A`
+- Contract (Studionet): [`0x5545bEfBAb9773728e5Df0B23c543d947891bA9A`](https://studio.genlayer.com)
 
 ## Disclaimer
 
