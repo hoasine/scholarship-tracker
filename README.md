@@ -119,7 +119,7 @@ python -m pytest tests/direct/test_scholarship_tracker.py
 ## Links
 
 - Live app: [https://scholarship-tracker-black.vercel.app](https://scholarship-tracker-black.vercel.app)
-- GitHub: [https://github.com/hoasine/scholarship-tracker](https://github.com/hoasine/scholarship-tracker)
+- GitHub: [https://github.com/hoasine/scholarship-tracker-dapp](https://github.com/hoasine/scholarship-tracker-dapp)
 - Contract (Studionet): `0x1b9AE02551dBeFD49d1bb508646d617bd6256B1C`
 
 ## Disclaimer
