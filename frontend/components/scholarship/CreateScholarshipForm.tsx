@@ -6,11 +6,12 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { TxStatus } from "@/components/TxStatus";
 import { useCreateScholarship } from "@/lib/hooks/useScholarshipTracker";
+import { useTxFeedback } from "@/lib/hooks/useTxFeedback";
 import { useWallet } from "@/lib/genlayer/WalletProvider";
 import { parseGenToWei } from "@/lib/utils/format";
-import { success, error as toastError } from "@/lib/utils/toast";
-import type { TransactionProgress } from "@/lib/contracts/ScholarshipTracker";
+import { error as toastError } from "@/lib/utils/toast";
 import { cn } from "@/lib/utils";
 
 const MIN_WEI = 10_000_000_000_000_000n;
@@ -24,12 +25,12 @@ const EPOCH_PRESETS = [
 export function CreateScholarshipForm({ onDone }: { onDone?: () => void }) {
   const { isConnected } = useWallet();
   const create = useCreateScholarship();
+  const tx = useTxFeedback();
   const [title, setTitle] = useState("");
   const [conditions, setConditions] = useState("");
   const [epochSeconds, setEpochSeconds] = useState(60);
   const [amount, setAmount] = useState("0.05");
   const [pool, setPool] = useState("0.5");
-  const [progress, setProgress] = useState<TransactionProgress | null>(null);
 
   const pending = create.isPending;
 
@@ -57,26 +58,24 @@ export function CreateScholarshipForm({ onDone }: { onDone?: () => void }) {
       if (epochSeconds < 60) {
         throw new Error("Epoch must be at least 60 seconds");
       }
-      setProgress({ stage: "preparing" });
+      tx.begin("Creating scholarship");
       const result = await create.mutateAsync({
         title: title.trim(),
         conditions: conditions.trim(),
         epochSeconds,
         amountPerEpochWei,
         poolWei,
-        onProgress: setProgress,
+        onProgress: tx.setProgress,
       });
-      success("Scholarship created", {
-        description: `Scholarship #${result.scholarshipId} is funded on-chain.`,
-      });
+      tx.succeed(
+        "Scholarship created",
+        `Scholarship #${result.scholarshipId} is funded on-chain.`
+      );
       setTitle("");
       setConditions("");
-      setProgress(null);
       onDone?.();
     } catch (err) {
-      toastError("Unable to create scholarship", {
-        description: err instanceof Error ? err.message : "Unknown error",
-      });
+      tx.fail("Unable to create scholarship", err);
     }
   };
 
@@ -204,16 +203,7 @@ export function CreateScholarshipForm({ onDone }: { onDone?: () => void }) {
           </>
         )}
       </Button>
-      {progress && (
-        <div className="soft-tile text-sm" role="status" aria-live="polite">
-          <p className="font-medium capitalize">Transaction: {progress.stage}</p>
-          {progress.hash && (
-            <code className="mt-1 block break-all text-xs text-muted-foreground">
-              {progress.hash}
-            </code>
-          )}
-        </div>
-      )}
+      <TxStatus progress={tx.progress} errorMessage={tx.errorMessage} />
     </form>
   );
 }

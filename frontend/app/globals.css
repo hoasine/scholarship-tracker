@@ -333,3 +333,48 @@ main > * {
   position: relative;
   z-index: 1;
 }
+
+/* Sonner: pin close button top-right so it never stacks above the spinner */
+[data-sonner-toast].scholarship-toast {
+  align-items: flex-start !important;
+  gap: 10px !important;
+  padding-right: 2.25rem !important;
+}
+
+[data-sonner-toast].scholarship-toast [data-content] {
+  min-width: 0;
+  flex: 1;
+}
+
+[data-sonner-toast].scholarship-toast .scholarship-toast-title {
+  line-height: 1.35;
+  font-weight: 600;
+}
+
+[data-sonner-toast].scholarship-toast .scholarship-toast-description {
+  margin-top: 0.2rem;
+  line-height: 1.4;
+  opacity: 0.9;
+  word-break: break-word;
+}
+
+[data-sonner-toast].scholarship-toast [data-close-button],
+[data-sonner-toast].scholarship-toast .scholarship-toast-close {
+  position: absolute !important;
+  top: 0.55rem !important;
+  right: 0.55rem !important;
+  left: auto !important;
+  transform: none !important;
+  margin: 0 !important;
+  height: 1.35rem !important;
+  width: 1.35rem !important;
+  border-radius: 999px !important;
+  flex-shrink: 0 !important;
+  background: oklch(0.24 0.03 250) !important;
+  border: 1px solid oklch(0.34 0.03 250) !important;
+  color: oklch(0.9 0.015 230) !important;
+}
+
+[data-sonner-toast][data-type="loading"].scholarship-toast-loading [data-close-button] {
+  display: none !important;
+}

@@ -2,11 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { AlertTriangle, ChevronDown, ChevronUp, Loader2, Scale } from "lucide-react";
-import type {
-  AwardView,
-  ScholarshipView,
-  TransactionProgress,
-} from "@/lib/contracts/ScholarshipTracker";
+import type { AwardView, ScholarshipView } from "@/lib/contracts/ScholarshipTracker";
 import {
   useAcceptAward,
   useAwardDetails,
@@ -16,10 +12,10 @@ import {
   useReviewEpoch,
   useSubmitProof,
 } from "@/lib/hooks/useScholarshipTracker";
+import { useTxFeedback } from "@/lib/hooks/useTxFeedback";
 import { useWallet } from "@/lib/genlayer/WalletProvider";
 import { formatCountdown, formatGen, parseGenToWei, shortAddr } from "@/lib/utils/format";
 import { validateEvidenceUrls } from "@/lib/utils/urls";
-import { success, error as toastError } from "@/lib/utils/toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -32,6 +28,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import { TxStatus } from "@/components/TxStatus";
 
 const MIN_WEI = 10_000_000_000_000_000n;
 
@@ -70,7 +67,7 @@ export function AwardPanel({
   const { address, isConnected } = useWallet();
   const [expanded, setExpanded] = useState(defaultExpanded);
   const [nowMs, setNowMs] = useState(() => Date.now());
-  const [progress, setProgress] = useState<TransactionProgress | null>(null);
+  const tx = useTxFeedback();
 
   const [proofOpen, setProofOpen] = useState(false);
   const [claimOpen, setClaimOpen] = useState(false);
@@ -155,15 +152,11 @@ export function AwardPanel({
 
   const onAccept = async () => {
     try {
-      setProgress({ stage: "preparing" });
-      await accept.mutateAsync({ awardId: award.id, onProgress: setProgress });
-      success("Award accepted", {
-        description: `Pinned conditions version v${scholarship.version}.`,
-      });
+      tx.begin("Accepting award");
+      await accept.mutateAsync({ awardId: award.id, onProgress: tx.setProgress });
+      tx.succeed("Award accepted", `Pinned conditions version v${scholarship.version}.`);
     } catch (err) {
-      toastError("Accept failed", {
-        description: err instanceof Error ? err.message : "Unknown error",
-      });
+      tx.fail("Accept failed", err);
     }
   };
 
@@ -173,13 +166,11 @@ export function AwardPanel({
       : "Leave this award? This cannot be undone.";
     if (!window.confirm(msg)) return;
     try {
-      setProgress({ stage: "preparing" });
-      await leave.mutateAsync({ awardId: award.id, onProgress: setProgress });
-      success("Left award", { description: "Award marked LEFT." });
+      tx.begin("Leaving award");
+      await leave.mutateAsync({ awardId: award.id, onProgress: tx.setProgress });
+      tx.succeed("Left award", "Award marked LEFT.");
     } catch (err) {
-      toastError("Leave failed", {
-        description: err instanceof Error ? err.message : "Unknown error",
-      });
+      tx.fail("Leave failed", err);
     }
   };
 
@@ -188,21 +179,19 @@ export function AwardPanel({
     try {
       const evidenceUrls = validateEvidenceUrls(urls);
       if (!notes.trim()) throw new Error("Proof notes are required");
-      setProgress({ stage: "preparing" });
+      tx.begin("Submitting proof");
       await submitProof.mutateAsync({
         awardId: award.id,
         notes: notes.trim(),
         evidenceUrls,
-        onProgress: setProgress,
+        onProgress: tx.setProgress,
       });
       setProofOpen(false);
       setNotes("");
       setUrls("");
-      success("Proof submitted", { description: "Anyone can trigger review when ready." });
+      tx.succeed("Proof submitted", "Anyone can trigger review when ready.");
     } catch (err) {
-      toastError("Submit proof failed", {
-        description: err instanceof Error ? err.message : "Unknown error",
-      });
+      tx.fail("Submit proof failed", err);
     }
   };
 
@@ -217,13 +206,11 @@ export function AwardPanel({
       }
     }
     try {
-      setProgress({ stage: "preparing" });
-      await review.mutateAsync({ awardId: award.id, onProgress: setProgress });
-      success("Epoch reviewed", { description: "AI validators returned a verdict." });
+      tx.begin("Reviewing epoch");
+      await review.mutateAsync({ awardId: award.id, onProgress: tx.setProgress });
+      tx.succeed("Epoch reviewed", "AI validators returned a verdict.");
     } catch (err) {
-      toastError("Review failed", {
-        description: err instanceof Error ? err.message : "Unknown error",
-      });
+      tx.fail("Review failed", err);
     }
   };
 
@@ -241,39 +228,35 @@ export function AwardPanel({
       ) {
         return;
       }
-      setProgress({ stage: "preparing" });
+      tx.begin("Filing claim");
       await fileClaim.mutateAsync({
         awardId: award.id,
         reason: claimReason.trim(),
         evidence: claimEvidence.trim(),
         evidenceUrls,
         stakeWei,
-        onProgress: setProgress,
+        onProgress: tx.setProgress,
       });
       setClaimOpen(false);
       setClaimReason("");
       setClaimEvidence("");
       setClaimUrls("");
-      success("Claim filed", { description: "Anyone can trigger AI judgment next." });
+      tx.succeed("Claim filed", "Anyone can trigger AI judgment next.");
     } catch (err) {
-      toastError("Claim failed", {
-        description: err instanceof Error ? err.message : "Unknown error",
-      });
+      tx.fail("Claim failed", err);
     }
   };
 
   const onJudge = async () => {
     try {
-      setProgress({ stage: "preparing" });
+      tx.begin("Judging claim");
       await judge.mutateAsync({
         claimId: award.open_claim_id,
-        onProgress: setProgress,
+        onProgress: tx.setProgress,
       });
-      success("Claim judged", { description: "AI consensus settled the dispute." });
+      tx.succeed("Claim judged", "AI consensus settled the dispute.");
     } catch (err) {
-      toastError("Judgment failed", {
-        description: err instanceof Error ? err.message : "Unknown error",
-      });
+      tx.fail("Judgment failed", err);
     }
   };
 
@@ -603,16 +586,7 @@ export function AwardPanel({
         </section>
       )}
 
-      {progress && (
-        <div className="soft-tile text-sm" role="status" aria-live="polite">
-          <p className="font-medium capitalize">Transaction: {progress.stage}</p>
-          {progress.hash && (
-            <code className="mt-1 block break-all text-xs text-muted-foreground">
-              {progress.hash}
-            </code>
-          )}
-        </div>
-      )}
+      <TxStatus progress={tx.progress} errorMessage={tx.errorMessage} />
     </article>
   );
 }

@@ -7,6 +7,7 @@ import {
   isPendingResultName,
   isSuccessResultName,
 } from "./tx-error";
+import { withTransientRpcRetry } from "@/lib/utils/rpc-retry";
 
 export type ScholarshipStatus = "ACTIVE" | "AMENDED" | "CLOSED";
 export type AwardStatus = "OFFERED" | "ACTIVE" | "AT_RISK" | "CUT" | "LEFT";
@@ -121,6 +122,8 @@ export type ProtocolConfig = {
 export type TransactionProgress = {
   hash?: string;
   stage: "preparing" | "submitted" | "finalizing" | "finalized";
+  /** Optional UI copy (e.g. RPC cooldown while retrying). */
+  message?: string;
 };
 
 export type WriteResult = {
@@ -205,6 +208,20 @@ export class ScholarshipTrackerClient {
     return client;
   }
 
+  private notifyRpcWait(
+    onProgress: ((progress: TransactionProgress) => void) | undefined,
+    stage: TransactionProgress["stage"],
+    hash: string | undefined,
+    remainingMs: number
+  ) {
+    const secs = Math.max(1, Math.ceil(remainingMs / 1000));
+    onProgress?.({
+      hash,
+      stage,
+      message: `RPC busy — still checking for up to ~${secs}s…`,
+    });
+  }
+
   private async waitForWrite(
     client: ReturnType<typeof createClient>,
     hash: Awaited<ReturnType<ReturnType<typeof createClient>["writeContract"]>>,
@@ -215,16 +232,26 @@ export class ScholarshipTrackerClient {
     } = AI_TX_WAIT,
     onProgress?: (progress: TransactionProgress) => void
   ) {
-    onProgress?.({ hash: String(hash), stage: "finalizing" });
-    const receipt = await client.waitForTransactionReceipt({
-      hash,
-      status: TransactionStatus.FINALIZED,
-      retries: options.retries,
-      interval: options.interval,
-      fullTransaction: true,
-    } as Parameters<typeof client.waitForTransactionReceipt>[0] & {
-      fullTransaction?: boolean;
-    });
+    const hashStr = String(hash);
+    onProgress?.({ hash: hashStr, stage: "finalizing" });
+
+    const receipt = await withTransientRpcRetry(
+      () =>
+        client.waitForTransactionReceipt({
+          hash,
+          status: TransactionStatus.FINALIZED,
+          retries: options.retries,
+          interval: options.interval,
+          fullTransaction: true,
+        } as Parameters<typeof client.waitForTransactionReceipt>[0] & {
+          fullTransaction?: boolean;
+        }),
+      {
+        timeoutMs: 60_000,
+        onRetry: ({ remainingMs }) =>
+          this.notifyRpcWait(onProgress, "finalizing", hashStr, remainingMs),
+      }
+    );
 
     const statusName = String(
       (receipt as { statusName?: string }).statusName ?? ""
@@ -255,8 +282,8 @@ export class ScholarshipTrackerClient {
       );
     }
 
-    onProgress?.({ hash: String(hash), stage: "finalized" });
-    return { hash: String(hash), receipt } satisfies WriteResult;
+    onProgress?.({ hash: hashStr, stage: "finalized" });
+    return { hash: hashStr, receipt } satisfies WriteResult;
   }
 
   private async write(
@@ -268,12 +295,20 @@ export class ScholarshipTrackerClient {
   ) {
     onProgress?.({ stage: "preparing" });
     const client = await this.getWriteClient();
-    const hash = await client.writeContract({
-      address: this.contractAddress,
-      functionName,
-      args,
-      value,
-    });
+    const hash = await withTransientRpcRetry(
+      () =>
+        client.writeContract({
+          address: this.contractAddress,
+          functionName,
+          args,
+          value,
+        }),
+      {
+        timeoutMs: 60_000,
+        onRetry: ({ remainingMs }) =>
+          this.notifyRpcWait(onProgress, "preparing", undefined, remainingMs),
+      }
+    );
     onProgress?.({ hash: String(hash), stage: "submitted" });
     return this.waitForWrite(client, hash, wait, onProgress);
   }
@@ -375,12 +410,20 @@ export class ScholarshipTrackerClient {
     const before = (await this.getProtocolConfig()).scholarship_count ?? 0;
     onProgress?.({ stage: "preparing" });
     const client = await this.getWriteClient();
-    const hash = await client.writeContract({
-      address: this.contractAddress,
-      functionName: "create_scholarship",
-      args: [title, conditions, epochSeconds, amountPerEpochWei.toString()],
-      value: poolWei,
-    });
+    const hash = await withTransientRpcRetry(
+      () =>
+        client.writeContract({
+          address: this.contractAddress,
+          functionName: "create_scholarship",
+          args: [title, conditions, epochSeconds, amountPerEpochWei.toString()],
+          value: poolWei,
+        }),
+      {
+        timeoutMs: 60_000,
+        onRetry: ({ remainingMs }) =>
+          this.notifyRpcWait(onProgress, "preparing", undefined, remainingMs),
+      }
+    );
     onProgress?.({ hash: String(hash), stage: "submitted" });
     const transaction = await this.waitForWrite(client, hash, FAST_TX_WAIT, onProgress);
     for (let i = 0; i < 20; i++) {

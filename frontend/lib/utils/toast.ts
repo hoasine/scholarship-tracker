@@ -9,11 +9,6 @@ import { toast as sonnerToast, ExternalToast } from "sonner";
 const defaultOptions: ExternalToast = {
   duration: 4000,
   closeButton: true,
-  style: {
-    background: 'hsl(var(--background))',
-    border: '1px solid hsl(var(--border))',
-    color: 'hsl(var(--foreground))',
-  },
 };
 
 // Success toast with accent colors (matching text-accent)
@@ -21,12 +16,6 @@ export const success = (message: string, options?: ExternalToast) => {
   return sonnerToast.success(message, {
     ...defaultOptions,
     duration: 4000,
-    style: {
-      background: 'hsl(var(--background))',
-      border: '1px solid hsl(var(--accent) / 0.3)',
-      color: 'hsl(var(--accent))',
-      ...options?.style,
-    },
     ...options,
   });
 };
@@ -36,12 +25,6 @@ export const error = (message: string, options?: ExternalToast) => {
   return sonnerToast.error(message, {
     ...defaultOptions,
     duration: 6000, // Longer for errors
-    style: {
-      background: 'hsl(var(--background))',
-      border: '1px solid hsl(var(--destructive) / 0.5)',
-      color: 'hsl(var(--destructive))',
-      ...options?.style,
-    },
     ...options,
   });
 };
@@ -51,12 +34,6 @@ export const warning = (message: string, options?: ExternalToast) => {
   return sonnerToast.warning(message, {
     ...defaultOptions,
     duration: 5000,
-    style: {
-      background: 'hsl(var(--background))',
-      border: '1px solid rgb(234 179 8 / 0.3)', // yellow-500/30
-      color: 'rgb(250 204 21)', // yellow-400
-      ...options?.style,
-    },
     ...options,
   });
 };
@@ -70,11 +47,44 @@ export const info = (message: string, options?: ExternalToast) => {
   });
 };
 
-// Loading toast for async operations
+// Loading toast for async operations — no close button (avoids broken X layout mid-tx)
 export const loading = (message: string, options?: ExternalToast) => {
   return sonnerToast.loading(message, {
     ...defaultOptions,
+    closeButton: false,
     duration: Infinity, // Manual dismiss
+    ...options,
+  });
+};
+
+const TX_TOAST_ID = "scholarship-tx-status";
+
+/** Long-lived loading toast updated as the tx progresses. */
+export const txLoading = (message: string) => {
+  return loading(message, { id: TX_TOAST_ID });
+};
+
+export const txLoadingUpdate = (message: string) => {
+  return sonnerToast.loading(message, {
+    ...defaultOptions,
+    id: TX_TOAST_ID,
+    closeButton: false,
+    duration: Infinity,
+  });
+};
+
+export const txSuccess = (message: string, options?: ExternalToast) => {
+  return success(message, {
+    id: TX_TOAST_ID,
+    duration: 4500,
+    ...options,
+  });
+};
+
+export const txError = (message: string, options?: ExternalToast) => {
+  return error(message, {
+    id: TX_TOAST_ID,
+    duration: 12000,
     ...options,
   });
 };
@@ -108,11 +118,6 @@ export const configError = (message: string, description?: string, action?: { la
       label: action.label,
       onClick: action.onClick,
     } : undefined,
-    style: {
-      background: 'hsl(var(--background))',
-      border: '1px solid hsl(var(--destructive) / 0.5)',
-      color: 'hsl(var(--destructive))',
-    },
   });
 };
 
@@ -121,11 +126,6 @@ export const userRejected = (message: string) => {
   return sonnerToast.info(message, {
     duration: 2000,
     closeButton: false,
-    style: {
-      background: 'hsl(var(--background))',
-      border: '1px solid hsl(var(--border))',
-      color: 'hsl(var(--muted-foreground))',
-    },
   });
 };
 
@@ -138,6 +138,10 @@ export const toastHelpers = {
   warning,
   info,
   loading,
+  txLoading,
+  txLoadingUpdate,
+  txSuccess,
+  txError,
   promise,
   configError,
   userRejected,

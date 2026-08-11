@@ -8,10 +8,7 @@ import {
   UserPlus,
   Wallet,
 } from "lucide-react";
-import type {
-  ScholarshipView,
-  TransactionProgress,
-} from "@/lib/contracts/ScholarshipTracker";
+import type { ScholarshipView } from "@/lib/contracts/ScholarshipTracker";
 import {
   useAmendConditions,
   useAwardStudent,
@@ -19,9 +16,9 @@ import {
   useFundScholarship,
   useScholarshipAwards,
 } from "@/lib/hooks/useScholarshipTracker";
+import { useTxFeedback } from "@/lib/hooks/useTxFeedback";
 import { useWallet } from "@/lib/genlayer/WalletProvider";
 import { formatGen, parseGenToWei, shortAddr } from "@/lib/utils/format";
-import { success, error as toastError } from "@/lib/utils/toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -35,6 +32,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { AwardPanel } from "@/components/scholarship/AwardPanel";
+import { TxStatus } from "@/components/TxStatus";
 
 const MIN_WEI = 10_000_000_000_000_000n;
 
@@ -64,7 +62,7 @@ function statusChip(status: string) {
 export function ScholarshipCard({ scholarship }: { scholarship: ScholarshipView }) {
   const { address, isConnected } = useWallet();
   const [expanded, setExpanded] = useState(false);
-  const [progress, setProgress] = useState<TransactionProgress | null>(null);
+  const tx = useTxFeedback();
 
   const [fundOpen, setFundOpen] = useState(false);
   const [awardOpen, setAwardOpen] = useState(false);
@@ -95,18 +93,16 @@ export function ScholarshipCard({ scholarship }: { scholarship: ScholarshipView 
     try {
       const valueWei = parseGenToWei(fundAmount);
       if (valueWei < MIN_WEI) throw new Error("Fund amount must be at least 0.01 GEN");
-      setProgress({ stage: "preparing" });
+      tx.begin("Funding pool");
       await fund.mutateAsync({
         scholarshipId: scholarship.id,
         valueWei,
-        onProgress: setProgress,
+        onProgress: tx.setProgress,
       });
       setFundOpen(false);
-      success("Pool funded", { description: `Added ${fundAmount} GEN to the pool.` });
+      tx.succeed("Pool funded", `Added ${fundAmount} GEN to the pool.`);
     } catch (err) {
-      toastError("Fund failed", {
-        description: err instanceof Error ? err.message : "Unknown error",
-      });
+      tx.fail("Fund failed", err);
     }
   };
 
@@ -117,19 +113,17 @@ export function ScholarshipCard({ scholarship }: { scholarship: ScholarshipView 
       if (!/^0x[a-fA-F0-9]{40}$/.test(student)) {
         throw new Error("Enter a valid 0x student address");
       }
-      setProgress({ stage: "preparing" });
+      tx.begin("Awarding student");
       await awardStudent.mutateAsync({
         scholarshipId: scholarship.id,
         student,
-        onProgress: setProgress,
+        onProgress: tx.setProgress,
       });
       setAwardOpen(false);
       setStudentAddr("");
-      success("Student awarded", { description: "Offer created — student can accept." });
+      tx.succeed("Student awarded", "Offer created — student can accept.");
     } catch (err) {
-      toastError("Award failed", {
-        description: err instanceof Error ? err.message : "Unknown error",
-      });
+      tx.fail("Award failed", err);
     }
   };
 
@@ -148,29 +142,28 @@ export function ScholarshipCard({ scholarship }: { scholarship: ScholarshipView 
       ) {
         return;
       }
-      setProgress({ stage: "preparing" });
+      tx.begin("Amending conditions");
       await amend.mutateAsync({
         scholarshipId: scholarship.id,
         newConditions: newConditions.trim(),
         reason: amendReason.trim(),
         stakeWei,
-        onProgress: setProgress,
+        onProgress: tx.setProgress,
       });
       setAmendOpen(false);
       setAmendReason("");
-      success("Conditions amended", { description: "New version recorded on-chain." });
+      tx.succeed("Conditions amended", "New version recorded on-chain.");
     } catch (err) {
-      toastError("Amend failed", {
-        description: err instanceof Error ? err.message : "Unknown error",
-      });
+      tx.fail("Amend failed", err);
     }
   };
 
   const onClose = async () => {
     if (Number(scholarship.active_award_count) > 0) {
-      toastError("Cannot close", {
-        description: "Active awards remain. Wait until awards are CUT or LEFT.",
-      });
+      tx.fail(
+        "Cannot close",
+        new Error("Active awards remain. Wait until awards are CUT or LEFT.")
+      );
       return;
     }
     if (
@@ -181,16 +174,14 @@ export function ScholarshipCard({ scholarship }: { scholarship: ScholarshipView 
       return;
     }
     try {
-      setProgress({ stage: "preparing" });
+      tx.begin("Closing scholarship");
       await close.mutateAsync({
         scholarshipId: scholarship.id,
-        onProgress: setProgress,
+        onProgress: tx.setProgress,
       });
-      success("Scholarship closed", { description: "Remaining pool returned to sponsor." });
+      tx.succeed("Scholarship closed", "Remaining pool returned to sponsor.");
     } catch (err) {
-      toastError("Close failed", {
-        description: err instanceof Error ? err.message : "Unknown error",
-      });
+      tx.fail("Close failed", err);
     }
   };
 
@@ -448,16 +439,7 @@ export function ScholarshipCard({ scholarship }: { scholarship: ScholarshipView 
         </section>
       )}
 
-      {progress && (
-        <div className="soft-tile text-sm" role="status" aria-live="polite">
-          <p className="font-medium capitalize">Transaction: {progress.stage}</p>
-          {progress.hash && (
-            <code className="mt-1 block break-all text-xs text-muted-foreground">
-              {progress.hash}
-            </code>
-          )}
-        </div>
-      )}
+      <TxStatus progress={tx.progress} errorMessage={tx.errorMessage} />
     </article>
   );
 }

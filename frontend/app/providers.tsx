@@ -30,6 +30,13 @@ export function Providers({ children }: { children: React.ReactNode }) {
         closeButton
         offset="88px"
         toastOptions={{
+          classNames: {
+            toast: "scholarship-toast",
+            title: "scholarship-toast-title",
+            description: "scholarship-toast-description",
+            closeButton: "scholarship-toast-close",
+            loading: "scholarship-toast-loading",
+          },
           style: {
             background: "oklch(0.2 0.028 250)",
             border: "1px solid oklch(0.34 0.03 250)",
