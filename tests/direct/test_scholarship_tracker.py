@@ -74,6 +74,13 @@ def _create(contract):
     )
 
 
+def _offer_and_accept(contract, direct_vm, direct_alice, direct_bob):
+    direct_vm.sender = direct_alice
+    contract.award_student(0, direct_bob.as_hex)
+    direct_vm.sender = direct_bob
+    contract.accept_award(0)
+
+
 class TestCreateAndAward:
     def test_create_scholarship(self, contract):
         _create(contract)
@@ -83,21 +90,51 @@ class TestCreateAndAward:
         assert s["amount_per_epoch"] == EPOCH_PAY
         assert "GitHub" in s["conditions"]
 
-    def test_award_student(self, contract, direct_bob):
+    def test_award_requires_accept(self, contract, direct_vm, direct_bob):
         _create(contract)
         contract.award_student(0, direct_bob.as_hex)
         awards = contract.get_scholarship_awards(0)
-        assert len(awards) == 1
-        assert awards[0]["status"] == "ACTIVE"
-        assert awards[0]["current_epoch"] == 0
+        assert awards[0]["status"] == "OFFERED"
+        assert awards[0]["accepted_conditions_version"] == 0
         assert contract.get_scholarship(0)["active_award_count"] == 1
 
+        direct_vm.sender = direct_bob
+        contract.accept_award(0)
+        award = contract.get_award(0)
+        assert award["status"] == "ACTIVE"
+        assert award["accepted_conditions_version"] == 1
+        assert award["accepted_conditions"] == CONDITIONS
+        assert award["epoch_deadline"] > 0
 
-class TestEpochReview:
-    def test_pass_releases_stipend(self, contract, direct_vm, direct_bob):
+    def test_leave_offer(self, contract, direct_vm, direct_bob):
         _create(contract)
         contract.award_student(0, direct_bob.as_hex)
         direct_vm.sender = direct_bob
+        contract.leave_award(0)
+        assert contract.get_award(0)["status"] == "LEFT"
+        assert contract.get_scholarship(0)["active_award_count"] == 0
+
+    def test_award_after_amend(self, contract, direct_vm, direct_alice, direct_bob):
+        _create(contract)
+        _payable(
+            contract,
+            "amend_conditions",
+            0,
+            "Must post weekly public demos on a public URL.",
+            "Tighten reporting cadence",
+            value=STAKE,
+        )
+        assert contract.get_scholarship(0)["status"] == "AMENDED"
+        contract.award_student(0, direct_bob.as_hex)
+        direct_vm.sender = direct_bob
+        contract.accept_award(0)
+        assert contract.get_award(0)["accepted_conditions_version"] == 2
+
+
+class TestEpochReview:
+    def test_pass_releases_stipend(self, contract, direct_vm, direct_alice, direct_bob):
+        _create(contract)
+        _offer_and_accept(contract, direct_vm, direct_alice, direct_bob)
         contract.submit_proof(
             0,
             "Published monthly report with new commits.",
@@ -117,11 +154,10 @@ class TestEpochReview:
         assert reviews[0]["verdict"] == "PASS"
         assert reviews[0]["amount_released"] == EPOCH_PAY
 
-    def test_warn_then_fail_cuts(self, contract, direct_vm, direct_bob, direct_alice):
+    def test_warn_then_fail_cuts(self, contract, direct_vm, direct_alice, direct_bob):
         _create(contract)
-        contract.award_student(0, direct_bob.as_hex)
+        _offer_and_accept(contract, direct_vm, direct_alice, direct_bob)
 
-        direct_vm.sender = direct_bob
         contract.submit_proof(0, "Weak notes only", "https://example.com/weak")
         direct_vm.clear_mocks()
         direct_vm.mock_web(r".*", _web("weak page"))
@@ -130,7 +166,6 @@ class TestEpochReview:
         assert contract.get_award(0)["status"] == "AT_RISK"
         assert contract.get_award(0)["warn_count"] == 1
 
-        # Resubmit same epoch after warn.
         contract.submit_proof(0, "Still insufficient", "https://example.com/weak2")
         direct_vm.clear_mocks()
         direct_vm.mock_web(r".*", _web("weak page 2"))
@@ -159,11 +194,10 @@ class TestAmendAndClaim:
         amendments = contract.get_scholarship_amendments(0)
         assert amendments[0]["old_conditions"] == CONDITIONS
 
-    def test_student_claim_after_cut(self, contract, direct_vm, direct_bob, direct_alice):
+    def test_student_claim_after_cut(self, contract, direct_vm, direct_alice, direct_bob):
         _create(contract)
-        contract.award_student(0, direct_bob.as_hex)
+        _offer_and_accept(contract, direct_vm, direct_alice, direct_bob)
 
-        direct_vm.sender = direct_bob
         contract.submit_proof(0, "ok", "https://example.com/a")
         direct_vm.clear_mocks()
         direct_vm.mock_web(r".*", _web("page"))

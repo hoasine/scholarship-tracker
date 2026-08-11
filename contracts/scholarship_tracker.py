@@ -59,6 +59,9 @@ class Award:
     has_open_claim: u256
     open_claim_id: u256
     cut_at: u256
+    accepted_at: u256
+    accepted_conditions_version: u256
+    accepted_conditions: str
 
 
 @allow_storage
@@ -270,6 +273,9 @@ class ScholarshipTracker(gl.Contract):
             "has_open_claim": int(a.has_open_claim) == 1,
             "open_claim_id": int(a.open_claim_id),
             "cut_at": int(a.cut_at),
+            "accepted_at": int(a.accepted_at),
+            "accepted_conditions_version": int(a.accepted_conditions_version),
+            "accepted_conditions": a.accepted_conditions,
         }
 
     def _proof_to_dict(self, p: Proof) -> dict:
@@ -568,17 +574,23 @@ Rules:
         s = self._require_scholarship(u256(int(scholarship_id)))
         if gl.message.sender_address != s.sponsor:
             raise gl.vm.UserError("Only sponsor can award")
-        if int(s.closed) == 1 or s.status != "ACTIVE":
+        if int(s.closed) == 1 or s.status not in ("ACTIVE", "AMENDED"):
             raise gl.vm.UserError("Scholarship not active")
         if int(s.pool_balance) < int(s.amount_per_epoch):
             raise gl.vm.UserError("Insufficient pool for an epoch payout")
         student_addr = Address(student)
-        # Prevent duplicate active awards for same student on same scholarship.
+        if student_addr == s.sponsor:
+            raise gl.vm.UserError("Sponsor cannot award themselves")
+        # Prevent duplicate open awards for same student on same scholarship.
         for i in range(int(s.award_count)):
             aid = self.scholarship_award_index[self._index_key(s.id, u256(i))]
             existing = self.awards[aid]
-            if existing.student == student_addr and existing.status in ("ACTIVE", "AT_RISK"):
-                raise gl.vm.UserError("Student already has an active award")
+            if existing.student == student_addr and existing.status in (
+                "OFFERED",
+                "ACTIVE",
+                "AT_RISK",
+            ):
+                raise gl.vm.UserError("Student already has an open award")
 
         aid = self.award_count
         self.award_count = u256(int(self.award_count) + 1)
@@ -587,23 +599,65 @@ Rules:
             id=aid,
             scholarship_id=s.id,
             student=student_addr,
-            status="ACTIVE",
+            status="OFFERED",
             current_epoch=u256(0),
             warn_count=u256(0),
             total_released=u256(0),
             awarded_at=now,
-            epoch_deadline=u256(int(now) + int(s.epoch_seconds)),
+            epoch_deadline=u256(0),
             last_review_at=u256(0),
             proof_count=u256(0),
             review_count=u256(0),
             has_open_claim=u256(0),
             open_claim_id=u256(0),
             cut_at=u256(0),
+            accepted_at=u256(0),
+            accepted_conditions_version=u256(0),
+            accepted_conditions="",
         )
         idx = s.award_count
         self.scholarship_award_index[self._index_key(s.id, idx)] = aid
         s.award_count = u256(int(s.award_count) + 1)
+        # Count offered slots so close stays blocked until resolved.
         s.active_award_count = u256(int(s.active_award_count) + 1)
+        self.scholarships[s.id] = s
+
+    @gl.public.write
+    def accept_award(self, award_id: int) -> None:
+        a = self._require_award(u256(int(award_id)))
+        s = self._require_scholarship(a.scholarship_id)
+        if gl.message.sender_address != a.student:
+            raise gl.vm.UserError("Only offered student can accept")
+        if a.status != "OFFERED":
+            raise gl.vm.UserError("Award is not an open offer")
+        if int(s.closed) == 1:
+            raise gl.vm.UserError("Scholarship is closed")
+        if int(s.pool_balance) < int(s.amount_per_epoch):
+            raise gl.vm.UserError("Insufficient pool for an epoch payout")
+        now = self._now_epoch()
+        a.status = "ACTIVE"
+        a.accepted_at = now
+        a.accepted_conditions_version = s.version
+        a.accepted_conditions = s.conditions
+        a.current_epoch = u256(0)
+        a.epoch_deadline = u256(int(now) + int(s.epoch_seconds))
+        self.awards[a.id] = a
+
+    @gl.public.write
+    def leave_award(self, award_id: int) -> None:
+        a = self._require_award(u256(int(award_id)))
+        s = self._require_scholarship(a.scholarship_id)
+        if gl.message.sender_address != a.student:
+            raise gl.vm.UserError("Only student can leave award")
+        if a.status not in ("OFFERED", "ACTIVE", "AT_RISK"):
+            raise gl.vm.UserError("Award cannot be left in current status")
+        if int(a.has_open_claim) == 1:
+            raise gl.vm.UserError("Resolve open claim first")
+        a.status = "LEFT"
+        a.epoch_deadline = u256(0)
+        if int(s.active_award_count) > 0:
+            s.active_award_count = u256(int(s.active_award_count) - 1)
+        self.awards[a.id] = a
         self.scholarships[s.id] = s
 
     @gl.public.write
@@ -653,11 +707,13 @@ Rules:
 
         proof = self._latest_unreviewed_proof(a)
         now = self._now_epoch()
-        late = int(now) > int(a.epoch_deadline)
+        late = int(a.epoch_deadline) > 0 and int(now) > int(a.epoch_deadline)
         notes = ""
         urls = ""
         proof_id = u256(0)
         if proof is None:
+            if not late:
+                raise gl.vm.UserError("Cannot review before deadline without a proof")
             notes = "(No proof submitted for this epoch)"
             late = True
         else:
@@ -668,7 +724,8 @@ Rules:
         page_text = self._scrape_urls(urls)
 
         title = s.title
-        conditions = s.conditions
+        # Prefer pinned accepted conditions for fairness after mid-stream amends.
+        conditions = a.accepted_conditions if a.accepted_conditions else s.conditions
         epoch_num = int(a.current_epoch)
         warn_count = int(a.warn_count)
 
@@ -867,7 +924,11 @@ Rules:
         a = self._require_award(cl.award_id)
         s = self._require_scholarship(cl.scholarship_id)
         page_text = self._scrape_urls(cl.evidence_urls)
-        original = self._original_conditions(s.id)
+        original = (
+            a.accepted_conditions
+            if a.accepted_conditions
+            else self._original_conditions(s.id)
+        )
 
         title = s.title
         current = s.conditions

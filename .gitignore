@@ -13,3 +13,8 @@ __pycache__/
 *.pyc
 .pytest_cache/
 .vercel
+/frontend/.next
+/frontend/next-env.d.ts
+/frontend/.vercel
+frontend/tsconfig.tsbuildinfo
+*.compiled.js
