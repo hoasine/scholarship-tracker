@@ -1,80 +1,127 @@
 # Scholarship Tracker
 
-## Escrowed scholarships with AI epoch review (GenLayer)
+<div align="center">
 
-Sponsors lock funds on-chain and publish **public, verifiable** conditions (progress reports, public URLs — not private GPA). Students must **accept** an offer before epochs start. Each epoch they submit proof; AI returns `PASS` / `WARN` / `FAIL`.
+## Escrowed Scholarships with AI Epoch Review on GenLayer
 
-- **PASS** → release one epoch stipend from the pool  
-- **WARN** → award becomes `AT_RISK`; student may resubmit  
-- **FAIL** after a prior warn → `CUT`  
-- Sponsors can amend conditions (stake + reason)  
-- Students can claim unfair cuts / unfair mid-stream rule changes  
-- Students can `leave_award` anytime before cut  
+| **Scholarship Tracker Platform** |
+|---|
+| **Lock GEN. Publish public conditions. Release stipends by milestone. Appeal unfair cuts.** |
 
-## Safety features
+[![Live App](https://img.shields.io/badge/Live-scholarship--tracker--black.vercel.app-0f172a?style=for-the-badge&logo=vercel)](https://scholarship-tracker-black.vercel.app)
+[![Contract](https://img.shields.io/badge/Contract-GenLayer_Python-1f6feb?style=for-the-badge)](#core-contract-api)
+[![Frontend](https://img.shields.io/badge/Frontend-Next.js_+_TypeScript-111827?style=for-the-badge)](#project-structure)
+[![Network](https://img.shields.io/badge/Network-GenLayer_Studionet-16a34a?style=for-the-badge)](#environment-variables)
 
-- Offer → accept gate (no forced awards)  
-- Conditions version pinned at accept time  
-- Sponsor cannot award themselves  
-- No early review without proof unless the deadline has passed  
-- Private/localhost evidence URLs blocked  
-- Amend after create still allows new awards (`ACTIVE` / `AMENDED`)  
+</div>
 
-## Statuses
+---
 
-Scholarship: `ACTIVE` → `AMENDED` → `CLOSED`  
-Award: `OFFERED` → `ACTIVE` → `AT_RISK` → `CUT` / `LEFT` (claim may restore `ACTIVE`)
+## Overview
 
-## Core API
+Scholarship Tracker is an education-funding protocol where sponsors lock GEN behind **public, verifiable** conditions (progress reports, public links — not private GPA).
+
+Students must **accept** an offer before epochs start. Each epoch they submit proof; GenLayer AI validators return `PASS` / `WARN` / `FAIL`. Passing releases one stipend from the pool. Weak results warn first; repeated failure cuts funding. Students can leave early or claim if a cut / mid-stream rule change is unfair.
+
+## Core Value Proposition
+
+- **Milestone payouts:** GEN releases only after AI epoch review
+- **Accept-before-start:** no forced awards; conditions pinned at accept time
+- **Fair cut path:** `WARN` → `FAIL` → `CUT` instead of one-shot termination
+- **Accountable amendments:** changing conditions requires stake + public reason
+- **Appeal layer:** students can claim unfair cuts or unfair rule changes
+- **Public evidence only:** localhost / private URLs blocked for AI-readable proofs
+
+## Protocol Flow
+
+1. **Sponsor creates scholarship** — funds a pool and publishes public conditions
+2. **Sponsor awards a student** — creates an `OFFERED` award (cannot self-award)
+3. **Student accepts** — pins condition version and starts the first epoch deadline
+4. **Student submits proof** — notes + public evidence URLs for the current epoch
+5. **Anyone calls `review_epoch`** — AI returns `PASS` / `WARN` / `FAIL` and settles
+6. **Optional amend / claim / leave / close** — rule changes, unfair-cut appeals, exit, recover pool
+
+Statuses:
+
+| Entity | Path |
+|--------|------|
+| Scholarship | `ACTIVE` → `AMENDED` → `CLOSED` |
+| Award | `OFFERED` → `ACTIVE` → `AT_RISK` → `CUT` / `LEFT` (claim may restore `ACTIVE`) |
+
+## Risk Controls
+
+| Risk | Mitigation in Scholarship Tracker |
+|------|-----------------------------------|
+| Forced / surprise awards | Offer → `accept_award` gate before proofs/reviews |
+| Mid-stream condition bait-and-switch | Conditions version + snapshot pinned at accept |
+| Instant unfair cut | Soft `WARN` before hard `CUT` |
+| Early spam reviews | No review without proof until deadline passes |
+| Private GPA / LMS dependence | Public URL + notes only; private hosts blocked |
+| Sponsor self-dealing | Sponsor cannot award themselves |
+| Amend blocking new awards | Awards allowed on `ACTIVE` or `AMENDED` |
+| Opaque pool drain | Epoch amount capped; remaining pool recoverable on close |
+
+## Core Contract API
 
 | Function | Type | Description |
 |----------|------|-------------|
-| `create_scholarship` | payable write | Create + fund pool |
-| `fund_scholarship` | payable write | Top up pool |
+| `create_scholarship` | write (payable) | Create scholarship + fund pool |
+| `fund_scholarship` | write (payable) | Top up pool |
 | `award_student` | write | Create `OFFERED` award |
 | `accept_award` | write | Student accepts; pins conditions; starts epoch |
-| `leave_award` | write | Student exits offer/active award |
+| `leave_award` | write | Student exits offer / active award |
 | `submit_proof` | write | Student proof for current epoch |
 | `review_epoch` | write | AI review + payout / warn / cut |
-| `amend_conditions` | payable write | Change conditions with stake |
-| `file_claim` / `judge_claim` | payable / write | Unfair-cut arbitration |
+| `amend_conditions` | write (payable) | Change conditions with stake + reason |
+| `file_claim` | write (payable) | Student unfair-cut / unfair-change claim |
+| `judge_claim` | write | AI arbitration + payout |
 | `close_scholarship` | write | Sponsor recovers remaining pool |
-| `get_scholarship` / `get_award` / … | view | Reads |
+| `get_scholarship` / `get_award` / … | view | Entity reads |
 
-## Config defaults
+## Project Structure
 
-- `minimum_stake` = 0.01 GEN  
-- `minimum_epoch_seconds` = 60 (demo-friendly)  
-- `max_warns_before_cut` = 1  
+```text
+contracts/   # GenLayer intelligent contract (Python)
+deploy/      # Contract deployment scripts
+frontend/    # Next.js application (TypeScript)
+tests/       # Contract/integration tests
+```
 
-## Local development
+## Environment Variables
+
+Configure in `frontend/.env.local` (see `frontend/.env.example`):
+
+```env
+NEXT_PUBLIC_CONTRACT_ADDRESS=0x1b9AE02551dBeFD49d1bb508646d617bd6256B1C
+NEXT_PUBLIC_GENLAYER_RPC_URL=https://studio.genlayer.com/api
+NEXT_PUBLIC_GENLAYER_CHAIN_ID=61999
+NEXT_PUBLIC_GENLAYER_CHAIN_NAME=GenLayer Studionet
+NEXT_PUBLIC_GENLAYER_SYMBOL=GEN
+```
+
+## Local Development
 
 ```bash
-# Contract tests
-pip install -r requirements-dev.txt
-python -m pytest tests/direct/test_scholarship_tracker.py
-
-# Frontend
 cd frontend
 npm install
 npm run dev
 ```
 
-Deploy `contracts/scholarship_tracker.py` in GenLayer Studio, then set `frontend/.env.local`:
+Deploy `contracts/scholarship_tracker.py` first (or use the Studionet address above), then update `NEXT_PUBLIC_CONTRACT_ADDRESS`.
 
-```env
-NEXT_PUBLIC_CONTRACT_ADDRESS=0x...
-NEXT_PUBLIC_GENLAYER_RPC_URL=https://studio.genlayer.com/api
+## Tests
+
+```bash
+pip install -r requirements-dev.txt
+python -m pytest tests/direct/test_scholarship_tracker.py
 ```
 
-## Demo script
+## Links
 
-1. Sponsor creates “Builder Grant” with public monthly report conditions + pool  
-2. Award student → student **accepts** (pins condition version)  
-3. Student submits proof URL → `review_epoch` → `PASS` + stipend  
-4. Weak epoch → `WARN` → another fail → `CUT`  
-5. Optional: amend conditions / student claim / leave  
+- Live app: [https://scholarship-tracker-black.vercel.app](https://scholarship-tracker-black.vercel.app)
+- GitHub: [https://github.com/hoasine/scholarship-tracker](https://github.com/hoasine/scholarship-tracker)
+- Contract (Studionet): `0x1b9AE02551dBeFD49d1bb508646d617bd6256B1C`
 
 ## Disclaimer
 
-Prototype for education/funding experiments. Not legal advice.
+Prototype/demo software for education/funding experiments. Not financial, legal, or scholarship compliance advice.
