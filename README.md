@@ -92,7 +92,7 @@ tests/       # Contract/integration tests
 Configure in `frontend/.env.local` (see `frontend/.env.example`):
 
 ```env
-NEXT_PUBLIC_CONTRACT_ADDRESS=0x1b9AE02551dBeFD49d1bb508646d617bd6256B1C
+NEXT_PUBLIC_CONTRACT_ADDRESS=0x5545bEfBAb9773728e5Df0B23c543d947891bA9A
 NEXT_PUBLIC_GENLAYER_RPC_URL=https://studio.genlayer.com/api
 NEXT_PUBLIC_GENLAYER_CHAIN_ID=61999
 NEXT_PUBLIC_GENLAYER_CHAIN_NAME=GenLayer Studionet
@@ -131,7 +131,7 @@ python -m pytest tests/direct/test_scholarship_tracker.py
 
 - Live app: [https://scholarship-tracker-black.vercel.app](https://scholarship-tracker-black.vercel.app)
 - GitHub: [https://github.com/hoasine/scholarship-tracker-dapp](https://github.com/hoasine/scholarship-tracker-dapp)
-- Contract (Studionet): `0x1b9AE02551dBeFD49d1bb508646d617bd6256B1C`
+- Contract (Studionet): `0x5545bEfBAb9773728e5Df0B23c543d947891bA9A`
 
 ## Disclaimer
 
