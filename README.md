@@ -49,10 +49,10 @@ Students must **accept** an offer before epochs start. Each epoch they submit pr
 
 1. **Sponsor creates scholarship** — funds a pool and publishes public conditions
 2. **Sponsor awards a student** — creates an `OFFERED` award (cannot self-award)
-3. **Student accepts** — pins condition version and starts the first epoch deadline
+3. **Student accepts** — pins condition version, reserves one epoch stipend, starts the first deadline
 4. **Student submits proof** — notes + public evidence URLs for the current epoch
 5. **Anyone calls `review_epoch`** — AI returns `PASS` / `WARN` / `FAIL` and settles
-6. **Optional amend / claim / leave / close** — rule changes, unfair-cut appeals, exit, recover pool
+6. **Optional amend / claim / leave / close** — Material vs Clarify rule changes, unfair-cut appeals, exit, recover pool
 
 Statuses:
 
@@ -61,12 +61,29 @@ Statuses:
 | Scholarship | `ACTIVE` → `AMENDED` → `CLOSED` |
 | Award | `OFFERED` → `ACTIVE` → `AT_RISK` → `CUT` / `LEFT` (claim may restore `ACTIVE`) |
 
+## Amend & Claim Rules
+
+| Rule | Behavior |
+|------|----------|
+| Amend while claim open | Blocked on-chain |
+| Clarify amend | Stake ≥ minimum stake; does **not** open a claim window |
+| Material amend | Stake ≥ `amount_per_epoch`; bumps conditions version; opens a **1-hour** claim window for active awards |
+| Claim after CUT | Allowed only while the post-cut claim window is open |
+| Claim after material amend | Allowed while award is `ACTIVE` / `AT_RISK` and the window is open |
+| LEFT awards | Cannot file claims |
+| Claim stake | Must cover contested item (epoch payout or amend stake) |
+| Claim evidence | Attaches challenged review; sponsor can `respond_to_claim` before judgment |
+| Fetch fail / empty page | Claim → `INCONCLUSIVE`; epoch review → `WARN` |
+| Close | Blocked while any award still has an open claim window |
+
+Demo claim / response window: `claim_window_seconds = 3600` (1 hour).
+
 ## Risk Controls
 
 | Risk | Mitigation in Scholarship Tracker |
 |------|-----------------------------------|
 | Forced / surprise awards | Offer → `accept_award` gate before proofs/reviews |
-| Mid-stream condition bait-and-switch | Conditions version + snapshot pinned at accept |
+| Mid-stream condition bait-and-switch | Conditions version + snapshot pinned at accept; Material vs Clarify |
 | Instant unfair cut | Soft `WARN` before hard `CUT` |
 | Early spam reviews | No review without proof until deadline passes |
 | Private GPA / LMS dependence | Public URL + notes only; private hosts blocked |
@@ -74,6 +91,13 @@ Statuses:
 | Amend blocking new awards | Awards allowed on `ACTIVE` or `AMENDED` |
 | Opaque pool drain | Epoch amount capped; remaining pool recoverable on close |
 | Invalid GenVM web scrape | `web.render` only inside leader/validator nondet blocks |
+| One-sided claim records | Claims attach challenged review + sponsor response evidence |
+| Unauthenticated pages | Timed consensus snapshots at proof/claim/response |
+| Unfunded accepted awards | One epoch stipend reserved from pool on `accept_award` |
+| Amend during open claim | Blocked on-chain |
+| Cheap claims | Claim stake must cover contested epoch/amend amount |
+| Left students claiming | `LEFT` cannot file claims |
+| Close while windows open | Blocked until claim windows expire |
 
 ## Core Contract API
 
@@ -82,14 +106,15 @@ Statuses:
 | `create_scholarship` | write (payable) | Create scholarship + fund pool |
 | `fund_scholarship` | write (payable) | Top up pool |
 | `award_student` | write | Create `OFFERED` award |
-| `accept_award` | write | Student accepts; pins conditions; starts epoch |
+| `accept_award` | write | Student accepts; pins conditions; reserves one epoch |
 | `leave_award` | write | Student exits offer / active award |
 | `submit_proof` | write | Student proof for current epoch |
 | `review_epoch` | write | AI review + payout / warn / cut |
-| `amend_conditions` | write (payable) | Change conditions with stake + reason |
+| `amend_conditions` | write (payable) | Clarify or Material change (`is_material`) + stake + reason |
 | `file_claim` | write (payable) | Student unfair-cut / unfair-change claim |
+| `respond_to_claim` | write | Sponsor reply before AI judgment |
 | `judge_claim` | write | AI arbitration + payout |
-| `close_scholarship` | write | Sponsor recovers remaining pool |
+| `close_scholarship` | write | Sponsor recovers remaining pool (blocked if claim windows open) |
 | `get_scholarship` / `get_award` / … | view | Entity reads |
 
 ## Demo Walkthrough (Studionet)
@@ -99,13 +124,14 @@ Statuses:
 3. **Award** a second wallet (sponsor cannot self-award).
 4. As the student: **Accept** → **Submit proof** with a **public HTTPS** report URL (GitHub README / blog).
 5. Anyone: **Review epoch** — wait for staged loading; do not spam retries if Studio RPC is busy.
-6. Optional: amend with stake, leave, file/judge claim, or close when no active awards remain.
+6. Optional: **Clarify** or **Material** amend (Material needs stake ≥ amount/epoch and opens a claim window), leave, file/respond/judge claim, or close after windows expire.
 
 Notes for reviewers:
 
 - `60s` epochs are demo-friendly; production programs can use longer windows.
 - Evidence must be publicly crawlable — localhost / private LAN URLs are rejected on-chain.
 - If Studio rate-limits, the UI keeps loading and retries for ~1 minute before surfacing an error.
+- After contract source changes, redeploy on Studionet and update `NEXT_PUBLIC_CONTRACT_ADDRESS` so live matches this build.
 
 ## Project Structure
 

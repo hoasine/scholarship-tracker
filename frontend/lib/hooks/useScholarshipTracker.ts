@@ -219,6 +219,7 @@ export function useAmendConditions() {
         scholarshipId: number;
         newConditions: string;
         reason: string;
+        isMaterial: boolean;
         stakeWei: bigint;
       } & ProgressInput
     ) => {
@@ -228,6 +229,7 @@ export function useAmendConditions() {
         input.scholarshipId,
         input.newConditions,
         input.reason,
+        input.isMaterial,
         input.stakeWei,
         input.onProgress
       );
@@ -257,6 +259,30 @@ export function useFileClaim() {
         input.evidence,
         input.evidenceUrls,
         input.stakeWei,
+        input.onProgress
+      );
+    },
+    onSuccess: invalidate,
+  });
+}
+
+export function useRespondToClaim() {
+  const client = useScholarshipClient();
+  const invalidate = useInvalidate();
+  return useMutation({
+    mutationFn: async (
+      input: {
+        claimId: number;
+        evidence: string;
+        evidenceUrls: string;
+      } & ProgressInput
+    ) => {
+      if (!client) throw new Error("Contract address not set");
+      await ensureGenLayerNetwork();
+      return client.respondToClaim(
+        input.claimId,
+        input.evidence,
+        input.evidenceUrls,
         input.onProgress
       );
     },

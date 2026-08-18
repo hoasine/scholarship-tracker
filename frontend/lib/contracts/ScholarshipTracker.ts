@@ -23,6 +23,8 @@ export type ScholarshipView = {
   epoch_seconds: number;
   amount_per_epoch: number | string;
   pool_balance: number | string;
+  reserved_balance?: number | string;
+  available_balance?: number | string;
   created_at: number;
   version: number;
   amendment_count: number;
@@ -41,9 +43,11 @@ export type AwardView = {
   current_epoch: number;
   warn_count: number;
   total_released: number | string;
+  reserved_amount?: number | string;
   awarded_at: number;
   epoch_deadline: number;
   last_review_at: number;
+  last_review_id?: number;
   proof_count: number;
   review_count: number;
   has_open_claim: boolean;
@@ -62,6 +66,8 @@ export type ProofView = {
   epoch: number;
   notes: string;
   evidence_urls: string;
+  evidence_snapshot?: string;
+  snapshot_at?: number;
   submitted_at: number;
   reviewed: boolean;
 };
@@ -76,6 +82,7 @@ export type EpochReviewView = {
   confidence: number;
   reasoning: string;
   amount_released: number | string;
+  evidence_snapshot?: string;
   reviewed_at: number;
   late_submission: boolean;
 };
@@ -100,6 +107,18 @@ export type ClaimView = {
   reason: string;
   evidence: string;
   evidence_urls: string;
+  student_snapshot?: string;
+  student_snapshot_at?: number;
+  challenged_review_id?: number;
+  challenged_epoch?: number;
+  challenged_verdict?: string;
+  challenged_reasoning?: string;
+  challenged_snapshot?: string;
+  challenged_reviewed_at?: number;
+  sponsor_evidence?: string;
+  sponsor_evidence_urls?: string;
+  sponsor_snapshot?: string;
+  sponsor_responded_at?: number;
   stake: number | string;
   created_at: number;
   judged_at: number;
@@ -481,12 +500,13 @@ export class ScholarshipTrackerClient {
     scholarshipId: number,
     newConditions: string,
     reason: string,
+    isMaterial: boolean,
     stakeWei: bigint,
     onProgress?: (progress: TransactionProgress) => void
   ) {
     return this.write(
       "amend_conditions",
-      [scholarshipId, newConditions, reason],
+      [scholarshipId, newConditions, reason, isMaterial ? 1 : 0],
       stakeWei,
       FAST_TX_WAIT,
       onProgress
@@ -505,6 +525,21 @@ export class ScholarshipTrackerClient {
       "file_claim",
       [awardId, reason, evidence, evidenceUrls],
       stakeWei,
+      FAST_TX_WAIT,
+      onProgress
+    );
+  }
+
+  respondToClaim(
+    claimId: number,
+    evidence: string,
+    evidenceUrls: string,
+    onProgress?: (progress: TransactionProgress) => void
+  ) {
+    return this.write(
+      "respond_to_claim",
+      [claimId, evidence, evidenceUrls],
+      0n,
       FAST_TX_WAIT,
       onProgress
     );

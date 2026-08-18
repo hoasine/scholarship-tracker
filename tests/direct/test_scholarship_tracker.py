@@ -62,6 +62,18 @@ def _payable(contract, method: str, *args, value: int):
         _DIRECT_VM.value = previous
 
 
+def _amend(contract, conditions: str, reason: str, *, material: bool = True, value: int = EPOCH_PAY):
+    return _payable(
+        contract,
+        "amend_conditions",
+        0,
+        conditions,
+        reason,
+        1 if material else 0,
+        value=value,
+    )
+
+
 def _create(contract):
     _payable(
         contract,
@@ -105,6 +117,10 @@ class TestCreateAndAward:
         assert award["accepted_conditions_version"] == 1
         assert award["accepted_conditions"] == CONDITIONS
         assert award["epoch_deadline"] > 0
+        assert award["reserved_amount"] == EPOCH_PAY
+        s = contract.get_scholarship(0)
+        assert s["reserved_balance"] == EPOCH_PAY
+        assert s["available_balance"] == POOL - EPOCH_PAY
 
     def test_leave_offer(self, contract, direct_vm, direct_bob):
         _create(contract)
@@ -116,13 +132,11 @@ class TestCreateAndAward:
 
     def test_award_after_amend(self, contract, direct_vm, direct_alice, direct_bob):
         _create(contract)
-        _payable(
+        _amend(
             contract,
-            "amend_conditions",
-            0,
             "Must post weekly public demos on a public URL.",
             "Tighten reporting cadence",
-            value=STAKE,
+            material=True,
         )
         assert contract.get_scholarship(0)["status"] == "AMENDED"
         contract.award_student(0, direct_bob.as_hex)
@@ -149,10 +163,14 @@ class TestEpochReview:
         assert award["status"] == "ACTIVE"
         assert award["current_epoch"] == 1
         assert award["total_released"] == EPOCH_PAY
-        assert contract.get_scholarship(0)["pool_balance"] == POOL - EPOCH_PAY
+        assert award["reserved_amount"] == EPOCH_PAY
+        s = contract.get_scholarship(0)
+        assert s["pool_balance"] == POOL - EPOCH_PAY
+        assert s["reserved_balance"] == EPOCH_PAY
         reviews = contract.get_award_reviews(0)
         assert reviews[0]["verdict"] == "PASS"
         assert reviews[0]["amount_released"] == EPOCH_PAY
+        assert reviews[0]["evidence_snapshot"]
 
     def test_warn_then_fail_cuts(self, contract, direct_vm, direct_alice, direct_bob):
         _create(contract)
@@ -173,26 +191,27 @@ class TestEpochReview:
         contract.review_epoch(0)
         award = contract.get_award(0)
         assert award["status"] == "CUT"
+        assert award["reserved_amount"] == 0
         assert contract.get_scholarship(0)["active_award_count"] == 0
+        assert contract.get_scholarship(0)["reserved_balance"] == 0
 
 
 class TestAmendAndClaim:
     def test_amend_conditions(self, contract):
         _create(contract)
-        _payable(
+        _amend(
             contract,
-            "amend_conditions",
-            0,
             "Must post weekly public demos on a public URL.",
             "Tighten reporting cadence",
-            value=STAKE,
+            material=True,
         )
         s = contract.get_scholarship(0)
         assert s["status"] == "AMENDED"
         assert s["version"] == 2
-        assert s["pool_balance"] == POOL + STAKE
+        assert s["pool_balance"] == POOL + EPOCH_PAY
         amendments = contract.get_scholarship_amendments(0)
         assert amendments[0]["old_conditions"] == CONDITIONS
+        assert amendments[0]["kind"] == "MATERIAL"
 
     def test_student_claim_after_cut(self, contract, direct_vm, direct_alice, direct_bob):
         _create(contract)
@@ -209,6 +228,7 @@ class TestAmendAndClaim:
         direct_vm.mock_llm(r".*", _review("FAIL"))
         contract.review_epoch(0)
         assert contract.get_award(0)["status"] == "CUT"
+        assert contract.get_award(0)["claim_window_ends"] > 0
 
         _payable(
             contract,
@@ -217,8 +237,23 @@ class TestAmendAndClaim:
             "Cut despite public report meeting original conditions.",
             "Report was updated; conditions were later tightened unfairly.",
             "https://example.com/proof",
-            value=STAKE,
+            value=EPOCH_PAY,
         )
+        claim = contract.get_claim(0)
+        assert claim["challenged_verdict"] in ("FAIL", "WARN")
+        assert claim["student_snapshot_at"] > 0
+        assert claim["claim_kind"] == "CUT"
+        assert claim["contested_amount"] == EPOCH_PAY
+
+        direct_vm.sender = direct_alice
+        contract.respond_to_claim(
+            0,
+            "Student missed the published cadence; cut was justified.",
+            "https://example.com/sponsor-record",
+        )
+        claim = contract.get_claim(0)
+        assert claim["sponsor_responded_at"] > 0
+
         direct_vm.clear_mocks()
         direct_vm.mock_web(r".*", _web("page"))
         direct_vm.mock_llm(r".*", _claim("STUDENT_WINS"))
@@ -227,6 +262,106 @@ class TestAmendAndClaim:
         assert claim["status"] == "JUDGED"
         assert claim["verdict"] == "STUDENT_WINS"
         assert contract.get_award(0)["status"] == "ACTIVE"
+        assert contract.get_award(0)["reserved_amount"] == EPOCH_PAY
+
+    def test_cannot_amend_during_open_claim(
+        self, contract, direct_vm, direct_alice, direct_bob
+    ):
+        _create(contract)
+        _offer_and_accept(contract, direct_vm, direct_alice, direct_bob)
+        contract.submit_proof(0, "ok", "https://example.com/a")
+        direct_vm.clear_mocks()
+        direct_vm.mock_web(r".*", _web("page"))
+        direct_vm.mock_llm(r".*", _review("WARN"))
+        contract.review_epoch(0)
+        contract.submit_proof(0, "still", "https://example.com/b")
+        direct_vm.clear_mocks()
+        direct_vm.mock_web(r".*", _web("page"))
+        direct_vm.mock_llm(r".*", _review("FAIL"))
+        contract.review_epoch(0)
+        _payable(
+            contract,
+            "file_claim",
+            0,
+            "Unfair cut",
+            "notes",
+            "https://example.com/proof",
+            value=EPOCH_PAY,
+        )
+        with pytest.raises(Exception):
+            _amend(contract, "Changed while claim open", "bad", material=True)
+
+    def test_left_cannot_claim(self, contract, direct_vm, direct_alice, direct_bob):
+        _create(contract)
+        _offer_and_accept(contract, direct_vm, direct_alice, direct_bob)
+        direct_vm.sender = direct_bob
+        contract.leave_award(0)
+        with pytest.raises(Exception):
+            _payable(
+                contract,
+                "file_claim",
+                0,
+                "after leave",
+                "notes",
+                "https://example.com/x",
+                value=EPOCH_PAY,
+            )
+
+    def test_self_award_forbidden(self, contract, direct_alice):
+        _create(contract)
+        with pytest.raises(Exception):
+            contract.award_student(0, direct_alice.as_hex)
+
+    def test_private_url_rejected(self, contract, direct_vm, direct_alice, direct_bob):
+        _create(contract)
+        _offer_and_accept(contract, direct_vm, direct_alice, direct_bob)
+        with pytest.raises(Exception):
+            contract.submit_proof(0, "notes", "http://localhost/secret")
+
+    def test_claim_stake_must_cover_epoch(
+        self, contract, direct_vm, direct_alice, direct_bob
+    ):
+        _create(contract)
+        _offer_and_accept(contract, direct_vm, direct_alice, direct_bob)
+        contract.submit_proof(0, "ok", "https://example.com/a")
+        direct_vm.clear_mocks()
+        direct_vm.mock_web(r".*", _web("page"))
+        direct_vm.mock_llm(r".*", _review("WARN"))
+        contract.review_epoch(0)
+        contract.submit_proof(0, "still", "https://example.com/b")
+        direct_vm.clear_mocks()
+        direct_vm.mock_web(r".*", _web("page"))
+        direct_vm.mock_llm(r".*", _review("FAIL"))
+        contract.review_epoch(0)
+        with pytest.raises(Exception):
+            _payable(
+                contract,
+                "file_claim",
+                0,
+                "cheap claim",
+                "notes",
+                "https://example.com/proof",
+                value=STAKE,  # 0.01 < epoch 0.02
+            )
+
+    def test_close_blocked_while_claim_window(
+        self, contract, direct_vm, direct_alice, direct_bob
+    ):
+        _create(contract)
+        _offer_and_accept(contract, direct_vm, direct_alice, direct_bob)
+        contract.submit_proof(0, "ok", "https://example.com/a")
+        direct_vm.clear_mocks()
+        direct_vm.mock_web(r".*", _web("page"))
+        direct_vm.mock_llm(r".*", _review("WARN"))
+        contract.review_epoch(0)
+        contract.submit_proof(0, "still", "https://example.com/b")
+        direct_vm.clear_mocks()
+        direct_vm.mock_web(r".*", _web("page"))
+        direct_vm.mock_llm(r".*", _review("FAIL"))
+        contract.review_epoch(0)
+        # Award CUT → claim window open, active_award_count 0, but window blocks close.
+        with pytest.raises(Exception):
+            contract.close_scholarship(0)
 
 
 class TestClose:

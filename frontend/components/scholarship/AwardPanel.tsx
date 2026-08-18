@@ -9,6 +9,7 @@ import {
   useFileClaim,
   useJudgeClaim,
   useLeaveAward,
+  useRespondToClaim,
   useReviewEpoch,
   useSubmitProof,
 } from "@/lib/hooks/useScholarshipTracker";
@@ -76,7 +77,10 @@ export function AwardPanel({
   const [claimReason, setClaimReason] = useState("");
   const [claimEvidence, setClaimEvidence] = useState("");
   const [claimUrls, setClaimUrls] = useState("");
-  const [claimStake, setClaimStake] = useState("0.01");
+  const [claimStake, setClaimStake] = useState(() => formatGen(scholarship.amount_per_epoch));
+  const [sponsorOpen, setSponsorOpen] = useState(false);
+  const [sponsorEvidence, setSponsorEvidence] = useState("");
+  const [sponsorUrls, setSponsorUrls] = useState("");
 
   const reviewableStatus = award.status === "ACTIVE" || award.status === "AT_RISK";
   const details = useAwardDetails(
@@ -88,6 +92,7 @@ export function AwardPanel({
   const submitProof = useSubmitProof();
   const review = useReviewEpoch();
   const fileClaim = useFileClaim();
+  const respondClaim = useRespondToClaim();
   const judge = useJudgeClaim();
 
   useEffect(() => {
@@ -97,6 +102,7 @@ export function AwardPanel({
 
   const me = address?.toLowerCase();
   const isStudent = Boolean(me && award.student.toLowerCase() === me);
+  const isSponsor = Boolean(me && scholarship.sponsor.toLowerCase() === me);
   const atRisk = award.status === "AT_RISK";
 
   const proofs = details.data?.proofs ?? [];
@@ -136,6 +142,8 @@ export function AwardPanel({
     !award.has_open_claim;
   const canJudge =
     Boolean(isConnected) && Boolean(award.has_open_claim) && Number(award.open_claim_id) >= 0;
+  const canRespond =
+    Boolean(isConnected) && isSponsor && Boolean(award.has_open_claim);
 
   const actionPending =
     accept.isPending ||
@@ -143,6 +151,7 @@ export function AwardPanel({
     submitProof.isPending ||
     review.isPending ||
     fileClaim.isPending ||
+    respondClaim.isPending ||
     judge.isPending;
 
   const countdown =
@@ -257,6 +266,27 @@ export function AwardPanel({
       tx.succeed("Claim judged", "AI consensus settled the dispute.");
     } catch (err) {
       tx.fail("Judgment failed", err);
+    }
+  };
+
+  const onRespond = async (event: React.FormEvent) => {
+    event.preventDefault();
+    try {
+      const evidenceUrls = validateEvidenceUrls(sponsorUrls);
+      if (!sponsorEvidence.trim()) throw new Error("Sponsor evidence notes are required");
+      tx.begin("Submitting sponsor response");
+      await respondClaim.mutateAsync({
+        claimId: award.open_claim_id,
+        evidence: sponsorEvidence.trim(),
+        evidenceUrls,
+        onProgress: tx.setProgress,
+      });
+      setSponsorOpen(false);
+      setSponsorEvidence("");
+      setSponsorUrls("");
+      tx.succeed("Sponsor response filed", "Timed snapshot stored for judgment.");
+    } catch (err) {
+      tx.fail("Sponsor response failed", err);
     }
   };
 
@@ -488,6 +518,49 @@ export function AwardPanel({
             "Review epoch"
           )}
         </Button>
+
+        {canRespond && (
+          <Dialog open={sponsorOpen} onOpenChange={setSponsorOpen}>
+            <DialogTrigger asChild>
+              <Button variant="outline" size="sm" disabled={actionPending}>
+                Respond to claim
+              </Button>
+            </DialogTrigger>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Sponsor claim response</DialogTitle>
+                <DialogDescription>
+                  Add opposing evidence with public URLs. Pages are snapshot at submit time for
+                  provenance before AI judgment.
+                </DialogDescription>
+              </DialogHeader>
+              <form onSubmit={onRespond} className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor={`sponsor-evidence-${award.id}`}>Evidence notes</Label>
+                  <Textarea
+                    id={`sponsor-evidence-${award.id}`}
+                    required
+                    value={sponsorEvidence}
+                    onChange={(e) => setSponsorEvidence(e.target.value)}
+                    rows={4}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor={`sponsor-urls-${award.id}`}>Public evidence URLs</Label>
+                  <Input
+                    id={`sponsor-urls-${award.id}`}
+                    value={sponsorUrls}
+                    onChange={(e) => setSponsorUrls(e.target.value)}
+                    placeholder="https://…"
+                  />
+                </div>
+                <Button type="submit" variant="gradient" className="w-full" disabled={actionPending}>
+                  {respondClaim.isPending ? "Submitting…" : "Submit sponsor evidence"}
+                </Button>
+              </form>
+            </DialogContent>
+          </Dialog>
+        )}
 
         {canJudge && (
           <Button variant="gradient" size="sm" onClick={onJudge} disabled={actionPending}>

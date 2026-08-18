@@ -71,7 +71,8 @@ export function ScholarshipCard({ scholarship }: { scholarship: ScholarshipView 
   const [studentAddr, setStudentAddr] = useState("");
   const [newConditions, setNewConditions] = useState(scholarship.conditions);
   const [amendReason, setAmendReason] = useState("");
-  const [amendStake, setAmendStake] = useState("0.01");
+  const [amendStake, setAmendStake] = useState("0.05");
+  const [amendMaterial, setAmendMaterial] = useState(true);
 
   const awards = useScholarshipAwards(scholarship.id, true);
   const fund = useFundScholarship();
@@ -130,14 +131,31 @@ export function ScholarshipCard({ scholarship }: { scholarship: ScholarshipView 
   const onAmend = async (event: React.FormEvent) => {
     event.preventDefault();
     try {
+      if (Number(scholarship.open_claim_count) > 0) {
+        throw new Error("Cannot amend while a claim is open");
+      }
       const stakeWei = parseGenToWei(amendStake);
-      if (stakeWei < MIN_WEI) throw new Error("Stake must be at least 0.01 GEN");
+      const epochWei = BigInt(String(scholarship.amount_per_epoch));
+      const minStake = amendMaterial
+        ? epochWei > MIN_WEI
+          ? epochWei
+          : MIN_WEI
+        : MIN_WEI;
+      if (stakeWei < minStake) {
+        throw new Error(
+          amendMaterial
+            ? "Material amend stake must be >= amount per epoch"
+            : "Stake must be at least 0.01 GEN"
+        );
+      }
       if (!newConditions.trim() || !amendReason.trim()) {
         throw new Error("New conditions and reason are required");
       }
       if (
         !window.confirm(
-          "Amend conditions with stake? Active students keep their pinned accepted conditions; they may claim if the change is unfair."
+          amendMaterial
+            ? "Material amend opens a claim window for active students. Continue?"
+            : "Clarifying amend (no claim window). Continue?"
         )
       ) {
         return;
@@ -147,6 +165,7 @@ export function ScholarshipCard({ scholarship }: { scholarship: ScholarshipView 
         scholarshipId: scholarship.id,
         newConditions: newConditions.trim(),
         reason: amendReason.trim(),
+        isMaterial: amendMaterial,
         stakeWei,
         onProgress: tx.setProgress,
       });
@@ -374,6 +393,31 @@ export function ScholarshipCard({ scholarship }: { scholarship: ScholarshipView 
                   />
                 </div>
                 <div className="space-y-2">
+                  <Label>Amendment type</Label>
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant={amendMaterial ? "gradient" : "outline"}
+                      onClick={() => setAmendMaterial(true)}
+                    >
+                      Material
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant={!amendMaterial ? "gradient" : "outline"}
+                      onClick={() => setAmendMaterial(false)}
+                    >
+                      Clarify
+                    </Button>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Material opens a claim window and requires stake ≥ amount/epoch. Clarify does
+                    not open a claim window.
+                  </p>
+                </div>
+                <div className="space-y-2">
                   <Label htmlFor={`amend-stake-${scholarship.id}`}>Stake (GEN)</Label>
                   <Input
                     id={`amend-stake-${scholarship.id}`}
@@ -386,7 +430,12 @@ export function ScholarshipCard({ scholarship }: { scholarship: ScholarshipView 
                     onChange={(e) => setAmendStake(e.target.value)}
                   />
                 </div>
-                <Button type="submit" variant="gradient" className="w-full" disabled={amend.isPending}>
+                <Button
+                  type="submit"
+                  variant="gradient"
+                  className="w-full"
+                  disabled={amend.isPending || Number(scholarship.open_claim_count) > 0}
+                >
                   {amend.isPending ? "Amending…" : "Confirm amendment"}
                 </Button>
               </form>
